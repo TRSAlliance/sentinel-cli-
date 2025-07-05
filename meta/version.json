@@ -1,6 +1,17 @@
 {
-  "version": "1.0.0",
-  "build": "stable",
-  "updated": "2025-07-05T00:00:00Z",
-  "author": "Daniel K L Hatton"
+  "name": "TRS Matrix Controller",
+  "version": "1.0.3",
+  "lastUpdate": "2025-07-05T16:02:00+10:00",
+  "description": "Simulated CLI control panel for ethical debugging and system protection.",
+  "author": "Daniel K L Hatton",
+  "trustNotice": "This tool is intended to support personal system repair, ethical development, and digital self-defense. Not for misuse.",
+  "systemIntegrity": {
+    "repairBot": "Operational",
+    "netlifyLink": "Verified",
+    "firebaseStatus": "Stable",
+    "databaseSync": "Connected",
+    "cliAccess": "Enabled",
+    "errorRate": "22.2%"
+  }
 }
+
