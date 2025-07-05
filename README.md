@@ -1,22 +1,32 @@
-# TRS Matrix Controller (sentinel-cli)
+# TRS Matrix Controller (`sentinel-cli`)
 
-A simulated command interface and status tracker for TRS ethical systems.
-
-## Features
-- ✅ Live system status rendering via `SYSTEM_STATUS.ts`
-- ✅ Command-based repair and Netlify/Firebase CLI simulation
-- ✅ Trust notice embedded in version metadata
-- ✅ Public system designed for ethical self-repair & project protection
-
-## Author
-Daniel K L Hatton  
-Built for TRSAlliance  
-“Protect the creator. Maintain the truth.”
+A simulated command-line interface and real-time status tracker for the TRS Alliance ethical framework.
 
 ---
 
-## Trust Notice
+### ✨ Features
 
-This CLI is for **educational**, **defensive**, and **ethical** purposes only.  
-It is **not to be repackaged, resold, or misused** against other individuals or groups.
+- ✅ **Live system status** rendering via `SYSTEM_STATUS.ts`
+- ✅ **Command-driven repair simulation** for Netlify, Firebase, and DB
+- ✅ **Trust layer metadata** powered by `version.json`
+- ✅ **CLI mimic** for ethical debugging and digital protection
+
+---
+
+### 👤 Author
+
+**Daniel K L Hatton**  
+Built for the **TRS Alliance**  
+_"Protect the creator. Maintain the truth."_
+
+---
+
+### ⚖️ Trust Notice
+
+This CLI is for **educational**, **defensive**, and **ethical** use only.  
+Repackaging, resale, or use in malicious systems is **strictly prohibited**.
+
+All commands and outputs are **simulated** unless officially integrated or authorized.
+
+---
 
