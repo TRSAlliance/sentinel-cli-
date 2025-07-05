@@ -1,4 +1,4 @@
-name: TRS-15 CLI Deployment
+name: trs15-deploy.yml
 
 on:
   push:
