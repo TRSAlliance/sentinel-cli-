@@ -29,4 +29,5 @@ Repackaging, resale, or use in malicious systems is **strictly prohibited**.
 All commands and outputs are **simulated** unless officially integrated or authorized.
 
 ---
+![Deploy](https://github.com/TRSAlliance/sentinel-cli-/actions/workflows/trs15-deploy.yml/badge.svg)
 
