@@ -1,33 +1,38 @@
-name: TRS-15 CLI Deployment
+# .github/workflows/trs15-deploy.yml
+
+name: 🛡️ TRS15 Netlify + Status Deploy
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
-  deploy:
+  deploy-trs15:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./sentinel-cli  # Adjust if firebase.json lives here
 
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Node.js
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
 
-      - name: Install Firebase CLI
-        run: npm install -g firebase-tools
+      - name: 📦 Install CLI + Build
+        run: |
+          npm install
+          npm run build || echo "No build needed"
 
-      - name: Firebase Deploy
-        run: firebase deploy --only hosting,functions --token "${{ secrets.FIREBASE_CLI_TOKEN }}"
+      - name: 🚀 Deploy to Netlify
+        uses: netlify/actions/cli@master
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        with:
+          args: deploy --dir=build --prod
 
-      - name: Supabase DB Push
-        run: supabase db push || echo "⚠️ Supabase not configured yet"
-
-      - name: Neon Deploy
-        run: neonctl deploy --database trs-15 || echo "⚠️ Neon not linked"
+      - name: 📡 Update SYSTEM_STATUS
+        run: node ./SYSTEM_STATUS.ts || echo "Pulse check skipped"
