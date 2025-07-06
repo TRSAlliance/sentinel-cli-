@@ -6,8 +6,8 @@ on:
   push:
     paths:
       - "meta/functions/**"
-    branches:
-      - main
+      branches: 
+      - main            
   workflow_dispatch:
 
 jobs:
