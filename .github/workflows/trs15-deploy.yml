@@ -1,0 +1,33 @@
+name: TRS-15 CLI Deployment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./sentinel-cli  # Adjust if firebase.json lives here
+
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Firebase Deploy
+        run: firebase deploy --only hosting,functions --token "${{ secrets.FIREBASE_CLI_TOKEN }}"
+
+      - name: Supabase DB Push
+        run: supabase db push || echo "⚠️ Supabase not configured yet"
+
+      - name: Neon Deploy
+        run: neonctl deploy --database trs-15 || echo "⚠️ Neon not linked"
