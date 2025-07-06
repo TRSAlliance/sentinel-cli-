@@ -1,13 +1,11 @@
-# .github/workflows/firebase-deploy.yml
-
 name: 🔥 Firebase Functions Deploy
 
 on:
   push:
+    branches:
+      - main
     paths:
       - "meta/functions/**"
-      branches: 
-      - main            
   workflow_dispatch:
 
 jobs:
