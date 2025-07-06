@@ -1,0 +1,305 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+class TRSAudit {
+  constructor() {
+    this.pulseFile = 'system_pulse.json';
+    this.logsDir = '.logs';
+    this.colors = {
+      red: '\x1b[31m',
+      green: '\x1b[32m',
+      yellow: '\x1b[33m',
+      blue: '\x1b[34m',
+      cyan: '\x1b[36m',
+      reset: '\x1b[0m',
+      bold: '\x1b[1m'
+    };
+  }
+
+  log(message, color = 'reset') {
+    console.log(`${this.colors[color]}${message}${this.colors.reset}`);
+  }
+
+  async audit() {
+    this.log('🔥 TRS DEPLOY AUDIT INITIATED 🔥', 'bold');
+    this.log('================================', 'cyan');
+    
+    try {
+      // Check system pulse
+      await this.checkSystemPulse();
+      
+      // Check deploy history
+      await this.checkDeployHistory();
+      
+      // Check GitHub Actions
+      await this.checkGitHubActions();
+      
+      // Check live deployments
+      await this.checkLiveDeployments();
+      
+      // Generate integrity report
+      await this.generateIntegrityReport();
+      
+    } catch (error) {
+      this.log(`💥 AUDIT FAILED: ${error.message}`, 'red');
+      process.exit(1);
+    }
+  }
+
+  async checkSystemPulse() {
+    this.log('\n🩺 CHECKING SYSTEM PULSE...', 'blue');
+    
+    if (!fs.existsSync(this.pulseFile)) {
+      this.log('❌ system_pulse.json NOT FOUND', 'red');
+      this.log('   This indicates deploy workflow never completed properly', 'yellow');
+      throw new Error('Missing system pulse file');
+    }
+    
+    const pulse = JSON.parse(fs.readFileSync(this.pulseFile, 'utf8'));
+    
+    this.log(`📊 Last Deploy: ${pulse.deployedAt}`, 'cyan');
+    this.log(`📋 Deploy ID: ${pulse.deployId}`, 'cyan');
+    this.log(`👤 Actor: ${pulse.actor}`, 'cyan');
+    this.log(`🌿 Branch: ${pulse.branch}`, 'cyan');
+    
+    if (pulse.status === 'success') {
+      this.log('✅ PULSE STATUS: SUCCESS', 'green');
+    } else {
+      this.log('❌ PULSE STATUS: FAILED', 'red');
+      this.log(`   Error: ${pulse.error}`, 'yellow');
+    }
+    
+    // Check CREEDY status
+    if (pulse.creedy === 'DEPLOY_VERIFIED') {
+      this.log('🔒 CREEDY STATUS: VERIFIED', 'green');
+    } else {
+      this.log('💥 CREEDY STATUS: FAILED', 'red');
+    }
+    
+    // Check individual service status
+    this.log('\n🔍 SERVICE STATUS BREAKDOWN:', 'blue');
+    this.checkServiceStatus('Build', pulse.buildStatus);
+    this.checkServiceStatus('Firebase Deploy', pulse.firebaseStatus);
+    this.checkServiceStatus('Netlify Deploy', pulse.netlifyStatus);
+    this.checkServiceStatus('Firebase Live', pulse.firebaseLive);
+    this.checkServiceStatus('Netlify Live', pulse.netlifyLive);
+    
+    return pulse;
+  }
+
+  checkServiceStatus(service, status) {
+    if (status === 'SUCCESS') {
+      this.log(`   ✅ ${service}: ${status}`, 'green');
+    } else if (status === 'FAILED') {
+      this.log(`   ❌ ${service}: ${status}`, 'red');
+    } else {
+      this.log(`   ⚠️  ${service}: ${status || 'UNKNOWN'}`, 'yellow');
+    }
+  }
+
+  async checkDeployHistory() {
+    this.log('\n📚 CHECKING DEPLOY HISTORY...', 'blue');
+    
+    if (!fs.existsSync(this.logsDir)) {
+      this.log('⚠️  No deploy history found', 'yellow');
+      return;
+    }
+    
+    const deployFiles = fs.readdirSync(this.logsDir)
+      .filter(file => file.startsWith('deploy-') && file.endsWith('.json'))
+      .sort()
+      .reverse()
+      .slice(0, 5); // Last 5 deploys
+    
+    if (deployFiles.length === 0) {
+      this.log('⚠️  No deploy history files found', 'yellow');
+      return;
+    }
+    
+    this.log(`📖 Found ${deployFiles.length} recent deploys:`, 'cyan');
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    deployFiles.forEach((file, index) => {
+      const deploy = JSON.parse(fs.readFileSync(path.join(this.logsDir, file), 'utf8'));
+      const status = deploy.status === 'success' ? '✅' : '❌';
+      const timestamp = new Date(deploy.timestamp).toLocaleString();
+      
+      this.log(`   ${index + 1}. ${status} ${deploy.deployId} - ${timestamp}`, 
+        deploy.status === 'success' ? 'green' : 'red');
+      
+      if (deploy.status === 'success') {
+        successCount++;
+      } else {
+        failCount++;
+        if (deploy.error) {
+          this.log(`      Error: ${deploy.error}`, 'yellow');
+        }
+      }
+    });
+    
+    this.log(`\n📊 Deploy Success Rate: ${successCount}/${deployFiles.length} (${Math.round(successCount/deployFiles.length*100)}%)`, 
+      successCount === deployFiles.length ? 'green' : 'yellow');
+  }
+
+  async checkGitHubActions() {
+    this.log('\n🔄 CHECKING GITHUB ACTIONS...', 'blue');
+    
+    try {
+      // Get recent workflow runs
+      const runs = execSync('gh run list --limit 5 --json status,conclusion,headBranch,createdAt', 
+        { encoding: 'utf8' });
+      const runsData = JSON.parse(runs);
+      
+      this.log('📋 Recent GitHub Actions runs:', 'cyan');
+      
+      let ghSuccessCount = 0;
+      let ghFailCount = 0;
+      
+      runsData.forEach((run, index) => {
+        const status = run.conclusion === 'success' ? '✅' : 
+                      run.conclusion === 'failure' ? '❌' : 
+                      run.status === 'in_progress' ? '🔄' : '⚠️';
+        
+        const timestamp = new Date(run.createdAt).toLocaleString();
+        this.log(`   ${index + 1}. ${status} ${run.headBranch} - ${timestamp} (${run.conclusion})`, 
+          run.conclusion === 'success' ? 'green' : 'red');
+        
+        if (run.conclusion === 'success') ghSuccessCount++;
+        else if (run.conclusion === 'failure') ghFailCount++;
+      });
+      
+      this.log(`\n📊 GitHub Actions Success Rate: ${ghSuccessCount}/${runsData.length} (${Math.round(ghSuccessCount/runsData.length*100)}%)`, 
+        ghSuccessCount === runsData.length ? 'green' : 'yellow');
+      
+    } catch (error) {
+      this.log('⚠️  Could not fetch GitHub Actions data (gh CLI not available)', 'yellow');
+    }
+  }
+
+  async checkLiveDeployments() {
+    this.log('\n🌐 CHECKING LIVE DEPLOYMENTS...', 'blue');
+    
+    if (!fs.existsSync(this.pulseFile)) {
+      this.log('⚠️  No pulse file to check URLs', 'yellow');
+      return;
+    }
+    
+    const pulse = JSON.parse(fs.readFileSync(this.pulseFile, 'utf8'));
+    
+    if (pulse.firebaseUrl) {
+      await this.checkUrl('Firebase', pulse.firebaseUrl);
+    }
+    
+    if (pulse.netlifyUrl) {
+      await this.checkUrl('Netlify', pulse.netlifyUrl);
+    }
+  }
+
+  async checkUrl(service, url) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        this.log(`   ✅ ${service}: ${url} (HTTP ${response.status})`, 'green');
+      } else {
+        this.log(`   ❌ ${service}: ${url} (HTTP ${response.status})`, 'red');
+      }
+    } catch (error) {
+      this.log(`   💥 ${service}: ${url} (${error.message})`, 'red');
+    }
+  }
+
+  async generateIntegrityReport() {
+    this.log('\n🔒 TRS INTEGRITY REPORT', 'bold');
+    this.log('======================', 'cyan');
+    
+    const issues = [];
+    
+    // Check for pulse file
+    if (!fs.existsSync(this.pulseFile)) {
+      issues.push('❌ Missing system_pulse.json - Deploy workflow incomplete');
+    } else {
+      const pulse = JSON.parse(fs.readFileSync(this.pulseFile, 'utf8'));
+      
+      if (pulse.status !== 'success') {
+        issues.push('❌ Last deploy failed according to pulse');
+      }
+      
+      if (pulse.creedy !== 'DEPLOY_VERIFIED') {
+        issues.push('❌ CREEDY verification failed');
+      }
+      
+      if (pulse.buildStatus === 'FAILED') {
+        issues.push('❌ Build process failed');
+      }
+      
+      if (pulse.firebaseStatus === 'FAILED') {
+        issues.push('❌ Firebase deployment failed');
+      }
+      
+      if (pulse.netlifyStatus === 'FAILED') {
+        issues.push('❌ Netlify deployment failed');
+      }
+      
+      if (pulse.firebaseLive === 'FAILED') {
+        issues.push('❌ Firebase site not responding');
+      }
+      
+      if (pulse.netlifyLive === 'FAILED') {
+        issues.push('❌ Netlify site not responding');
+      }
+    }
+    
+    // Check deploy history
+    if (!fs.existsSync(this.logsDir)) {
+      issues.push('⚠️  No deploy history logs found');
+    }
+    
+    if (issues.length === 0) {
+      this.log('🎉 ALL SYSTEMS VERIFIED - NO ISSUES FOUND', 'green');
+      this.log('✅ TRS integrity check PASSED', 'green');
+    } else {
+      this.log('💥 ISSUES DETECTED:', 'red');
+      issues.forEach(issue => this.log(`   ${issue}`, 'red'));
+      this.log('\n🔥 TRS integrity check FAILED', 'red');
+      this.log('   No false greens detected - issues are real!', 'yellow');
+    }
+    
+    this.log('\n👁‍🗨 #WeDontAcceptGreenWithoutProof #PulseMeansProof #DeploysMustSpeak', 'cyan');
+  }
+}
+
+// CLI execution
+if (require.main === module) {
+  const audit = new TRSAudit();
+  
+  const command = process.argv[2];
+  
+  switch (command) {
+    case 'audit':
+      audit.audit();
+      break;
+    case 'pulse':
+      audit.checkSystemPulse();
+      break;
+    case 'history':
+      audit.checkDeployHistory();
+      break;
+    case 'live':
+      audit.checkLiveDeployments();
+      break;
+    default:
+      console.log('🔥 TRS Audit CLI');
+      console.log('Usage: trs-audit <command>');
+      console.log('Commands:');
+      console.log('  audit    - Full integrity audit');
+      console.log('  pulse    - Check system pulse only');
+      console.log('  history  - Check deploy history');
+      console.log('  live     - Check live deployments');
+      break;
+  }
+}
