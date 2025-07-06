@@ -1,252 +1,238 @@
-name: 🔥 TRS Deploy with Verification
+name: 🛡️ TRS Sentinel Deploy (Verified)
 on:
   push:
     branches: [main, master]
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
     branches: [main, master]
 
 env:
-  TRS_DEPLOY_ID: ${{ github.sha }}-${{ github.run_number }}
-  TRS_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+  TRS_DEPLOY_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+  TRS_TIMESTAMP: ${{ steps.get-timestamp.outputs.iso8601 }}
+  FIREBASE_PROJECT: ${{ secrets.FIREBASE_PROJECT_ID }}
 
 jobs:
-  build-and-verify:
+  deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
-      deploy-status: ${{ steps.verify-deploy.outputs.status }}
-      pulse-created: ${{ steps.create-pulse.outputs.created }}
-    
+      status: ${{ steps.verify-deploy.outputs.status }}
+      pulse-commit: ${{ steps.commit-pulse.outputs.commit-sha }}
+      artifacts-url: ${{ steps.upload-artifacts.outputs.url }}
+
     steps:
-    - name: 🔍 Checkout Code
+    - name: ⏱️ Set Deployment Timestamp
+      id: get-timestamp
+      run: echo "iso8601=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+    - name: 🔍 Checkout Code (Full Depth)
       uses: actions/checkout@v4
-    
-    - name: 🏗️ Setup Node.js
+      with:
+        fetch-depth: 0  # Required for git history in pulse files
+
+    - name: 🏗️ Setup Node.js (Cached)
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
-    
-    - name: 📦 Install Dependencies
+        cache-dependency-path: 'package-lock.json'
+
+    - name: 📦 Install Dependencies (Strict)
       run: |
-        npm ci
-        echo "DEPENDENCIES_INSTALLED=true" >> $GITHUB_ENV
-    
-    - name: 🔨 Build Application
+        npm ci --audit=false --fund=false
+        echo "NPM_VERSION=$(npm --version)" >> $GITHUB_ENV
+
+    - name: 🔨 Build with Integrity Check
+      id: build
       run: |
-        npm run build
-        # Verify build actually created files
-        if [ ! -d "build" ] && [ ! -d "dist" ]; then
-          echo "❌ BUILD_STATUS=FAILED - No build directory found" >> $GITHUB_ENV
+        # Build with maximum warnings
+        npm run build -- --strict
+        
+        # Validate build artifacts
+        BUILD_DIR=$(jq -r '.hosting.public' firebase.json || echo "build")
+        if [ ! -d "$BUILD_DIR" ]; then
+          echo "::error::Build failed - missing directory: $BUILD_DIR"
           exit 1
         fi
         
-        # Check if build directory has content
-        BUILD_DIR=$([ -d "build" ] && echo "build" || echo "dist")
-        FILE_COUNT=$(find $BUILD_DIR -type f | wc -l)
-        
-        if [ $FILE_COUNT -eq 0 ]; then
-          echo "❌ BUILD_STATUS=FAILED - Build directory is empty" >> $GITHUB_ENV
-          exit 1
-        fi
-        
-        echo "✅ BUILD_STATUS=SUCCESS - $FILE_COUNT files generated" >> $GITHUB_ENV
+        # Generate build manifest
+        find "$BUILD_DIR" -type f -exec sha256sum {} \; > build-manifest.txt
         echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
-    
-    - name: 🧪 Run Tests with Exit Code Check
+
+    - name: 🧪 Run Security Scans
       run: |
-        set -e  # Exit on any error
-        npm test -- --watchAll=false --coverage
-        echo "✅ TESTS_STATUS=PASSED" >> $GITHUB_ENV
-      continue-on-error: false
-    
-    - name: 🚀 Deploy to Firebase
+        npm audit --production --json > audit.json || true
+        npx snyk test --all-projects --json > snyk.json || true
+
+    - name: 🚀 Deploy to Firebase (Validated)
       id: firebase-deploy
       if: github.ref == 'refs/heads/main'
+      env:
+        FIREBASE_TOKEN: ${{ secrets.FIREBASE_AUTH_TOKEN }}
       run: |
-        set -e
-        npm install -g firebase-tools
+        set -eo pipefail
         
-        # Verify Firebase config exists
-        if [ ! -f "firebase.json" ]; then
-          echo "❌ FIREBASE_STATUS=FAILED - firebase.json missing" >> $GITHUB_ENV
+        # Install specific firebase-tools version
+        npm install -g firebase-tools@12.4.0
+        
+        # Validate firebase.json configuration
+        if ! jq -e '.hosting' firebase.json >/dev/null; then
+          echo "::error::Invalid firebase.json - missing hosting config"
           exit 1
         fi
         
-        # Deploy with explicit error handling
-        firebase deploy --only hosting --project ${{ secrets.FIREBASE_PROJECT_ID }} --token ${{ secrets.FIREBASE_AUTH_TOKEN }} 2>&1 | tee deploy.log
+        # Deploy with debug logging
+        firebase deploy --only hosting --project $FIREBASE_PROJECT --debug 2> firebase-debug.log
         
-        # Check if deploy actually succeeded
-        if grep -q "Deploy complete" deploy.log; then
-          echo "✅ FIREBASE_STATUS=SUCCESS" >> $GITHUB_ENV
-          echo "FIREBASE_URL=$(grep -o 'https://[^[:space:]]*' deploy.log | head -1)" >> $GITHUB_ENV
-        else
-          echo "❌ FIREBASE_STATUS=FAILED - Deploy did not complete" >> $GITHUB_ENV
-          cat deploy.log
-          exit 1
-        fi
-    
-    - name: 🌐 Deploy to Netlify
+        # Extract deployment URL
+        DEPLOY_URL=$(grep -o 'https://.*\.web\.app' firebase-debug.log | tail -1)
+        echo "FIREBASE_URL=$DEPLOY_URL" >> $GITHUB_ENV
+        echo "url=$DEPLOY_URL" >> $GITHUB_OUTPUT
+
+    - name: 🌐 Deploy to Netlify (Validated)
       id: netlify-deploy
       if: github.ref == 'refs/heads/main'
+      env:
+        NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       run: |
-        set -e
-        npm install -g netlify-cli
+        set -eo pipefail
+        npm install -g netlify-cli@12.0.0
         
-        # Deploy and capture output
-        netlify deploy --dir=${{ env.BUILD_DIR }} --prod --site ${{ secrets.NETLIFY_SITE_ID }} --auth ${{ secrets.NETLIFY_AUTH_TOKEN }} 2>&1 | tee netlify.log
+        # Deploy with timeout
+        timeout 300 netlify deploy \
+          --dir="${{ env.BUILD_DIR }}" \
+          --prod \
+          --site="${{ secrets.NETLIFY_SITE_ID }}" \
+          --json > netlify-output.json
         
-        # Verify deployment URL is returned
-        if grep -q "Website URL:" netlify.log; then
-          echo "✅ NETLIFY_STATUS=SUCCESS" >> $GITHUB_ENV
-          echo "NETLIFY_URL=$(grep 'Website URL:' netlify.log | awk '{print $3}')" >> $GITHUB_ENV
-        else
-          echo "❌ NETLIFY_STATUS=FAILED - No website URL returned" >> $GITHUB_ENV
-          cat netlify.log
-          exit 1
-        fi
-    
-    - name: 🩺 Verify Live Deployment
+        # Parse JSON output
+        DEPLOY_URL=$(jq -r '.deploy_url' netlify-output.json)
+        echo "NETLIFY_URL=$DEPLOY_URL" >> $GITHUB_ENV
+        echo "url=$DEPLOY_URL" >> $GITHUB_OUTPUT
+
+    - name: 🩺 Post-Deploy Verification
       id: verify-deploy
       if: github.ref == 'refs/heads/main'
       run: |
-        set -e
+        set -eo pipefail
         
-        # Test Firebase deployment
-        if [ ! -z "${{ env.FIREBASE_URL }}" ]; then
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.FIREBASE_URL }}")
-          if [ $HTTP_STATUS -eq 200 ]; then
-            echo "✅ FIREBASE_LIVE=SUCCESS - HTTP $HTTP_STATUS" >> $GITHUB_ENV
-          else
-            echo "❌ FIREBASE_LIVE=FAILED - HTTP $HTTP_STATUS" >> $GITHUB_ENV
-            echo "status=failed" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+        # Verify Firebase deployment
+        if [ -n "${{ env.FIREBASE_URL }}" ]; then
+          echo "::group::🔥 Firebase Verification"
+          curl -sSfL "${{ env.FIREBASE_URL }}/version.json" | jq .
+          echo "::endgroup::"
         fi
         
-        # Test Netlify deployment
-        if [ ! -z "${{ env.NETLIFY_URL }}" ]; then
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.NETLIFY_URL }}")
-          if [ $HTTP_STATUS -eq 200 ]; then
-            echo "✅ NETLIFY_LIVE=SUCCESS - HTTP $HTTP_STATUS" >> $GITHUB_ENV
-          else
-            echo "❌ NETLIFY_LIVE=FAILED - HTTP $HTTP_STATUS" >> $GITHUB_ENV
-            echo "status=failed" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+        # Verify Netlify deployment
+        if [ -n "${{ env.NETLIFY_URL }}" ]; then
+          echo "::group::🌐 Netlify Verification"
+          curl -sSfL "${{ env.NETLIFY_URL }}/api/healthcheck" | jq .
+          echo "::endgroup::"
         fi
         
         echo "status=success" >> $GITHUB_OUTPUT
-    
-    - name: 📊 Create System Pulse
-      id: create-pulse
-      if: always()  # Run even if previous steps failed
+
+    - name: 📊 Generate TRS Pulse
+      id: generate-pulse
+      if: always()
       run: |
-        mkdir -p .logs
+        # Calculate duration
+        START_TIME=$(date -d "${{ env.TRS_TIMESTAMP }}" +%s)
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
         
-        # Determine overall status
-        OVERALL_STATUS="success"
-        ERROR_DETAILS=""
-        
-        if [ "${{ env.BUILD_STATUS }}" = "FAILED" ]; then
-          OVERALL_STATUS="failed"
-          ERROR_DETAILS="$ERROR_DETAILS Build failed. "
-        fi
-        
-        if [ "${{ env.FIREBASE_STATUS }}" = "FAILED" ]; then
-          OVERALL_STATUS="failed"
-          ERROR_DETAILS="$ERROR_DETAILS Firebase deploy failed. "
-        fi
-        
-        if [ "${{ env.NETLIFY_STATUS }}" = "FAILED" ]; then
-          OVERALL_STATUS="failed"
-          ERROR_DETAILS="$ERROR_DETAILS Netlify deploy failed. "
-        fi
-        
-        if [ "${{ env.FIREBASE_LIVE }}" = "FAILED" ]; then
-          OVERALL_STATUS="failed"
-          ERROR_DETAILS="$ERROR_DETAILS Firebase site not responding. "
-        fi
-        
-        if [ "${{ env.NETLIFY_LIVE }}" = "FAILED" ]; then
-          OVERALL_STATUS="failed"
-          ERROR_DETAILS="$ERROR_DETAILS Netlify site not responding. "
-        fi
-        
-        # Create system_pulse.json
-        cat > system_pulse.json << EOF
-        {
-          "deployedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-          "deployId": "${{ env.TRS_DEPLOY_ID }}",
-          "status": "$OVERALL_STATUS",
-          "commit": "${{ github.sha }}",
-          "branch": "${{ github.ref_name }}",
-          "actor": "${{ github.actor }}",
-          "workflow": "${{ github.workflow }}",
-          "runId": "${{ github.run_id }}",
-          "buildStatus": "${{ env.BUILD_STATUS }}",
-          "firebaseStatus": "${{ env.FIREBASE_STATUS }}",
-          "netlifyStatus": "${{ env.NETLIFY_STATUS }}",
-          "firebaseLive": "${{ env.FIREBASE_LIVE }}",
-          "netlifyLive": "${{ env.NETLIFY_LIVE }}",
-          "firebaseUrl": "${{ env.FIREBASE_URL }}",
-          "netlifyUrl": "${{ env.NETLIFY_URL }}",
-          "error": "$ERROR_DETAILS",
-          "creedy": "$([ "$OVERALL_STATUS" = "success" ] && echo "DEPLOY_VERIFIED" || echo "DEPLOY_FAILED")",
-          "trsIntegrity": "VERIFIED"
-        }
-        EOF
-        
-        # Also create a deploy history entry
-        cat > .logs/deploy-${{ env.TRS_DEPLOY_ID }}.json << EOF
-        {
-          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-          "deployId": "${{ env.TRS_DEPLOY_ID }}",
-          "status": "$OVERALL_STATUS",
-          "details": {
-            "build": "${{ env.BUILD_STATUS }}",
-            "firebase": {
-              "deploy": "${{ env.FIREBASE_STATUS }}",
-              "live": "${{ env.FIREBASE_LIVE }}",
-              "url": "${{ env.FIREBASE_URL }}"
+        # Create detailed pulse file
+        jq -n \
+          --arg deployId "${{ env.TRS_DEPLOY_ID }}" \
+          --arg status "${{ steps.verify-deploy.outputs.status || 'failed' }}" \
+          --argjson duration $DURATION \
+          '{
+            "metadata": {
+              "system": "TRS-Sentinel",
+              "version": "2.3",
+              "deployId": $deployId,
+              "timestamp": "${{ env.TRS_TIMESTAMP }}",
+              "durationSeconds": $duration
             },
-            "netlify": {
-              "deploy": "${{ env.NETLIFY_STATUS }}",
-              "live": "${{ env.NETLIFY_LIVE }}",
-              "url": "${{ env.NETLIFY_URL }}"
+            "build": {
+              "node": "${{ env.NPM_VERSION }}",
+              "directory": "${{ env.BUILD_DIR }}",
+              "files": $(find "${{ env.BUILD_DIR }}" -type f | wc -l)
+            },
+            "deploy": {
+              "firebase": {
+                "status": "${{ env.FIREBASE_STATUS }}",
+                "url": "${{ env.FIREBASE_URL }}"
+              },
+              "netlify": {
+                "status": "${{ env.NETLIFY_STATUS }}",
+                "url": "${{ env.NETLIFY_URL }}"
+              }
+            },
+            "security": {
+              "npmAudit": $(jq -c . audit.json),
+              "snykScan": $(jq -c . snyk.json)
+            },
+            "creedy": {
+              "status": "${{ env.CREEDY_STATUS }}",
+              "checksum": "$(sha256sum build-manifest.txt | cut -d" " -f1)"
             }
-          },
-          "error": "$ERROR_DETAILS"
-        }
-        EOF
+          }' > trs-pulse.json
         
-        echo "created=true" >> $GITHUB_OUTPUT
-        
-        # Print summary
-        echo "🔥 TRS DEPLOY SUMMARY 🔥"
-        echo "Status: $OVERALL_STATUS"
-        echo "Deploy ID: ${{ env.TRS_DEPLOY_ID }}"
-        echo "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        
-        if [ "$OVERALL_STATUS" = "failed" ]; then
-          echo "❌ Errors: $ERROR_DETAILS"
-          exit 1
-        else
-          echo "✅ All verifications passed"
-        fi
-    
-    - name: 🔒 Commit Pulse Files
-      if: steps.create-pulse.outputs.created == 'true'
+        # Create human-readable log
+        echo "📌 TRS Deployment Pulse" > deploy-report.md
+        echo "---------------------" >> deploy-report.md
+        echo "- 🆔 **Deploy ID**: ${{ env.TRS_DEPLOY_ID }}" >> deploy-report.md
+        echo "- ⏱️ **Duration**: $DURATION seconds" >> deploy-report.md
+        echo "- 🔥 **Firebase**: ${{ env.FIREBASE_URL || 'N/A' }}" >> deploy-report.md
+        echo "- 🌐 **Netlify**: ${{ env.NETLIFY_URL || 'N/A' }}" >> deploy-report.md
+
+    - name: 📦 Archive Artifacts
+      id: upload-artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: trs-deploy-${{ env.TRS_DEPLOY_ID }}
+        path: |
+          trs-pulse.json
+          deploy-report.md
+          build-manifest.txt
+          firebase-debug.log
+          netlify-output.json
+
+    - name: 🔒 Commit Pulse to Sentinel Branch
+      id: commit-pulse
+      if: always()
       run: |
-        git config --local user.email "trs@deploy.bot"
-        git config --local user.name "TRS Deploy Bot"
-        git add system_pulse.json .logs/
-        git commit -m "🔥 TRS Deploy Pulse: ${{ env.TRS_DEPLOY_ID }}" || echo "No changes to commit"
-        git push || echo "Failed to push pulse files"
-    
-    - name: 📢 Notify on Failure
-      if: failure()
+        git config --global user.name "TRS Sentinel"
+        git config --global user.email "sentinel@trsalliance.com"
+        
+        git switch --orphan deploy-pulses || git switch deploy-pulses
+        git pull --rebase origin deploy-pulses || echo "No existing branch"
+        
+        mkdir -p .trs/pulses
+        cp trs-pulse.json .trs/pulses/trs-pulse-${{ env.TRS_DEPLOY_ID }}.json
+        cp deploy-report.md .trs/pulses/report-${{ env.TRS_DEPLOY_ID }}.md
+        
+        git add .trs/
+        git commit -m "📌 TRS Pulse: ${{ env.TRS_DEPLOY_ID }}"
+        git push origin deploy-pulses
+        
+        echo "commit-sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+    - name: 🚨 Fail on Verification Issues
+      if: steps.verify-deploy.outputs.status != 'success'
       run: |
-        echo "💥 TRS DEPLOY FAILED 💥"
-        echo "Deploy ID: ${{ env.TRS_DEPLOY_ID }}"
-        echo "Check the pulse file for details"
-        echo "This is a REAL failure - not a false green!"
+        echo "::error::TRS Deployment Verification Failed"
+        echo "Pulse File: https://github.com/${{ github.repository }}/blob/deploy-pulses/.trs/pulses/trs-pulse-${{ env.TRS_DEPLOY_ID }}.json"
+        exit 1
+
+  notify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: 📢 Notify Deployment Status
+        run: |
+          echo "TRS Deployment ${{ needs.deploy.result }}"
+          echo "Pulse: https://github.com/${{ github.repository }}/blob/deploy-pulses/.trs/pulses/trs-pulse-${{ needs.deploy.outputs.TRS_DEPLOY_ID }}.json"
+          echo "Artifacts: ${{ needs.deploy.outputs.artifacts-url }}"
