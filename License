@@ -1,3 +1,4 @@
+
 MIT License
 
 Copyright (c) 2025 Daniel K L Hatton
@@ -24,4 +25,18 @@ You are **not permitted to**:
 All system commands and AI outputs are fictional/simulated unless integrated by the original author.
 
 © 2025 Daniel K L Hatton. All Rights Reserved.
+
+---
+
+### 🛠 Optional Add-Ons:
+- 📛 `CREEDY.md` to describe proof logic
+- 📈 Deploy history in `logs/deploy-history.json`
+- 🎯 CLI Tests with snapshot comparisons (`/tests/cli.test.ts`)
+
+Let me know if you want to publish this CLI as an NPM package, or lock it into `trs-cli.org`.
+
+👁‍🗨 #READMEWitnessed  
+#ProtectTheCreator  
+#DeploysMustSpeak
+
 
