@@ -1,33 +1,29 @@
-# TRS Matrix Controller (`sentinel-cli`)
+# 🛡️ TRS Matrix Controller (`sentinel-cli`)
 
-A simulated command-line interface and real-time status tracker for the TRS Alliance ethical framework.
-
----
-
-### ✨ Features
-
-- ✅ **Live system status** rendering via `SYSTEM_STATUS.ts`
-- ✅ **Command-driven repair simulation** for Netlify, Firebase, and DB
-- ✅ **Trust layer metadata** powered by `version.json`
-- ✅ **CLI mimic** for ethical debugging and digital protection
+A command-line interface and real-time status engine for **TRS Alliance** — designed to defend creators, protect the truth, and track trust across Netlify, Firebase, and live metadata.
 
 ---
 
-### 👤 Author
+## ✨ Features
 
-**Daniel K L Hatton**  
-Built for the **TRS Alliance**  
-_"Protect the creator. Maintain the truth."_
-
----
-
-### ⚖️ Trust Notice
-
-This CLI is for **educational**, **defensive**, and **ethical** use only.  
-Repackaging, resale, or use in malicious systems is **strictly prohibited**.
-
-All commands and outputs are **simulated** unless officially integrated or authorized.
+- ✅ **Live System Status** via `SYSTEM_STATUS.ts`
+- 🔧 **Command-driven Repair Simulations** (Netlify, Firebase, Neon DB, etc.)
+- 🔖 **Version + Trust Metadata** via `version.json`
+- 📡 **Deploy Witness Logs** via `system_pulse.json`
+- 🧠 **CLI-Like Interface** for ethical debugging and transparent system reflection
+- ⚙️ **Integrated with TRS Deploy Lock & Pulse Validation**
 
 ---
-![Deploy](https://github.com/TRSAlliance/sentinel-cli-/actions/workflows/trs15-deploy.yml/badge.svg)
+
+## 📦 Structure
+
+```bash
+.github/workflows/
+├── firebase-deploy.yml
+├── trs15-deploy.yml
+
+meta/functions/
+├── system_pulse.json
+├── SYSTEM_STATUS.ts
+├── version.json
 
