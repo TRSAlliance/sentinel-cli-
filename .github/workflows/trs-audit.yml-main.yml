@@ -1,0 +1,37 @@
+name: 🔍 TRS Audit CLI Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 4 * * *' # Daily at 4:00 UTC
+
+jobs:
+  audit:
+    name: Run TRS Audit CLI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Install Dependencies
+        run: npm install
+
+      - name: 🧪 Run TRS Deploy Audit CLI
+        run: node meta/functions/TRS\ Deploy\ audit\ CLI.js audit
+
+      - name: ✅ Audit Passed
+        if: success()
+        run: echo "✅ TRS Audit CLI passed successfully"
+
+      - name: ❌ Audit Failed
+        if: failure()
+        run: echo "❌ TRS Audit CLI failed — check output above"
